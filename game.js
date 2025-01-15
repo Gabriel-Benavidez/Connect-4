@@ -1,21 +1,21 @@
 class Connect4 {
     constructor() {
-        this.socket = new WebSocket('ws://localhost:8765');
-        this.gameId = null;
-        this.playerNumber = null;
         this.currentPlayer = 1;
         this.board = Array(6).fill().map(() => Array(7).fill(0));
-        
+        this.gameActive = false;
+        this.setupBoard();
         this.setupEventListeners();
-        this.setupWebSocket();
     }
     
     setupEventListeners() {
-        document.getElementById('create-game').addEventListener('click', () => this.createGame());
-        document.getElementById('join-button').addEventListener('click', () => this.joinGame());
-        
-        // Create the game board UI
+        document.getElementById('start-game').addEventListener('click', () => this.startGame());
+        document.getElementById('reset-game').addEventListener('click', () => this.resetGame());
+    }
+    
+    setupBoard() {
         const boardElement = document.getElementById('board');
+        boardElement.innerHTML = ''; // Clear existing board
+        
         for (let col = 0; col < 7; col++) {
             const column = document.createElement('div');
             column.className = 'column';
@@ -34,82 +34,92 @@ class Connect4 {
         }
     }
     
-    setupWebSocket() {
-        this.socket.onmessage = (event) => {
-            const data = JSON.parse(event.data);
-            
-            switch(data.type) {
-                case 'game_created':
-                    this.gameId = data.game_id;
-                    this.playerNumber = data.player;
-                    document.getElementById('game-info').textContent = `You are Player ${this.playerNumber}. Game ID: ${this.gameId}`;
-                    document.getElementById('game-controls').style.display = 'none';
-                    break;
-                    
-                case 'game_joined':
-                    this.playerNumber = data.player;
-                    document.getElementById('game-info').textContent = `You are Player ${this.playerNumber}`;
-                    document.getElementById('game-controls').style.display = 'none';
-                    break;
-                    
-                case 'game_start':
-                    document.getElementById('game-info').textContent += ' - Game Started!';
-                    break;
-                    
-                case 'update':
-                    this.updateBoard(data.board);
-                    this.currentPlayer = data.current_player;
-                    
-                    if (data.winner) {
-                        document.getElementById('game-info').textContent = `Player ${data.winner} wins!`;
-                    } else {
-                        document.getElementById('game-info').textContent = 
-                            `You are Player ${this.playerNumber} - ${this.currentPlayer === this.playerNumber ? 'Your turn' : 'Opponent\'s turn'}`;
-                    }
-                    break;
-            }
-        };
+    startGame() {
+        this.gameActive = true;
+        this.currentPlayer = 1;
+        this.board = Array(6).fill().map(() => Array(7).fill(0));
+        this.setupBoard();
+        document.getElementById('game-info').textContent = "Player 1's Turn";
+        document.getElementById('reset-game').style.display = 'block';
+        document.getElementById('start-game').style.display = 'none';
     }
     
-    createGame() {
-        this.socket.send(JSON.stringify({
-            type: 'create'
-        }));
-        document.getElementById('join-game').style.display = 'block';
-    }
-    
-    joinGame() {
-        const gameId = document.getElementById('game-id').value;
-        this.gameId = gameId;
-        this.socket.send(JSON.stringify({
-            type: 'join',
-            game_id: gameId
-        }));
+    resetGame() {
+        this.startGame();
     }
     
     handleMove(column) {
-        if (this.currentPlayer === this.playerNumber) {
-            this.socket.send(JSON.stringify({
-                type: 'move',
-                game_id: this.gameId,
-                column: column
-            }));
+        if (!this.gameActive) return;
+        
+        // Find the first empty row in the column
+        for (let row = 5; row >= 0; row--) {
+            if (this.board[row][column] === 0) {
+                this.board[row][column] = this.currentPlayer;
+                this.updateCell(row, column);
+                
+                if (this.checkWin(row, column)) {
+                    document.getElementById('game-info').textContent = `Player ${this.currentPlayer} Wins!`;
+                    this.gameActive = false;
+                    document.getElementById('start-game').style.display = 'block';
+                    return;
+                }
+                
+                if (this.checkDraw()) {
+                    document.getElementById('game-info').textContent = "It's a Draw!";
+                    this.gameActive = false;
+                    document.getElementById('start-game').style.display = 'block';
+                    return;
+                }
+                
+                this.currentPlayer = this.currentPlayer === 1 ? 2 : 1;
+                document.getElementById('game-info').textContent = `Player ${this.currentPlayer}'s Turn`;
+                return;
+            }
         }
     }
     
-    updateBoard(newBoard) {
-        this.board = newBoard;
-        for (let row = 0; row < 6; row++) {
-            for (let col = 0; col < 7; col++) {
-                const cell = document.querySelector(`[data-row="${row}"][data-col="${col}"]`);
-                cell.className = 'cell';
-                if (newBoard[row][col] === 1) {
-                    cell.classList.add('player1');
-                } else if (newBoard[row][col] === 2) {
-                    cell.classList.add('player2');
-                }
+    updateCell(row, column) {
+        const cell = document.querySelector(`[data-row="${row}"][data-col="${column}"]`);
+        cell.className = 'cell';
+        cell.classList.add(`player${this.currentPlayer}`);
+    }
+    
+    checkWin(row, col) {
+        const directions = [
+            [[0,1], [0,-1]], // horizontal
+            [[1,0], [-1,0]], // vertical
+            [[1,1], [-1,-1]], // diagonal /
+            [[1,-1], [-1,1]] // diagonal \
+        ];
+        
+        for (let [dir1, dir2] of directions) {
+            let count = 1;
+            
+            // Check first direction
+            let r = row + dir1[0];
+            let c = col + dir1[1];
+            while (r >= 0 && r < 6 && c >= 0 && c < 7 && this.board[r][c] === this.currentPlayer) {
+                count++;
+                r += dir1[0];
+                c += dir1[1];
             }
+            
+            // Check opposite direction
+            r = row + dir2[0];
+            c = col + dir2[1];
+            while (r >= 0 && r < 6 && c >= 0 && c < 7 && this.board[r][c] === this.currentPlayer) {
+                count++;
+                r += dir2[0];
+                c += dir2[1];
+            }
+            
+            if (count >= 4) return true;
         }
+        return false;
+    }
+    
+    checkDraw() {
+        return this.board[0].every(cell => cell !== 0);
     }
 }
 
